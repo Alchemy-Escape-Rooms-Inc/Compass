@@ -22,7 +22,7 @@ const char* VERSION = FIRMWARE_VERSION;
 
 // WiFi Configuration
 const char* WIFI_SSID = "AlchemyGuest";
-const char* WIFI_PASSWORD = "";
+const char* WIFI_PASSWORD = "VoodooVacation5601";
 
 // MQTT Broker (Watchtower)
 const char* MQTT_BROKER = "10.1.10.115";
@@ -65,6 +65,8 @@ bool puzzleSolved = false;
 bool puzzleWasSolved = false;
 unsigned long lastHeartbeat = 0;
 unsigned long solvedTime = 0;
+unsigned long mqttConnectedTime = 0;
+const unsigned long STARTUP_GRACE_MS = 3000;
 
 // Direction names for display
 const char* DIRECTIONS[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
@@ -109,8 +111,7 @@ void setup() {
 
     // Configure ADC for potentiometer
     analogReadResolution(12);  // 12-bit resolution (0-4095)
-    analogSetAttenuation(ADC_11db);  // Full range 0-3.3V
-    pinMode(POT_PIN, INPUT);
+    analogSetPinAttenuation(POT_PIN, ADC_11db);  // Full range 0-3.3V on this pin
 
     // Initialize networking
     setupWiFi();
@@ -224,7 +225,11 @@ void reconnectMQTT() {
         Serial.print("Subscribed to: ");
         Serial.println(topicCommand);
 
+        // Clear any retained command (prevents RESET boot loops)
+        mqtt.publish(topicCommand.c_str(), "", true);
+
         // Announce online status
+        mqttConnectedTime = millis();
         mqtt.publish(topicStatus.c_str(), "ONLINE", true);
         publishLog("BlueCompass controller online");
 
@@ -257,6 +262,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.println(command);
 
     if (strcmp(topicBuf, topicCommand.c_str()) == 0) {
+        if (millis() - mqttConnectedTime < STARTUP_GRACE_MS) {
+            Serial.println("Ignoring retained command during startup grace period");
+            return;
+        }
         handleCommand(command);
     }
 }
